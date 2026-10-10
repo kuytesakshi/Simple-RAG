@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 
-const newId = () =>
-  typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-const histKey = (username) => `rag-history:${username}`;
-
 export default function ChatPage() {
   const { token, user, ready, logout } = useAuth();
   const router = useRouter();
   const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [busy, setBusy] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
 
@@ -26,91 +20,109 @@ export default function ChatPage() {
     if (ready && !token) router.replace("/login");
   }, [token, ready, router]);
 
-  // Load per-user history (browser-local) once session is ready
-  useEffect(() => {
-    if (!ready || !user) return;
-    try {
-      const saved = JSON.parse(localStorage.getItem(histKey(user.username)) || "[]");
-      if (Array.isArray(saved)) {
-        setConversations(saved);
-        setActiveId(saved[0]?.id ?? null);
+  const fail = useCallback(
+    (err) => {
+      if (err.response?.status === 401) {
+        logout();
+        router.replace("/login");
+        return true;
       }
-    } catch {
-      /* corrupted history: start fresh */
-    }
-  }, [ready, user]);
+      return false;
+    },
+    [logout, router]
+  );
 
-  // Persist on every change
+  // Load conversation list once session is ready
   useEffect(() => {
-    if (!ready || !user) return;
-    localStorage.setItem(histKey(user.username), JSON.stringify(conversations));
-  }, [conversations, ready, user]);
+    if (!ready || !token) return;
+    api
+      .get("/api/conversations/")
+      .then(({ data }) => {
+        setConversations(data);
+        if (data[0]) selectConvo(data[0].id);
+      })
+      .catch(fail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, token]);
 
-  if (!ready || !token) return null;
-  const active = conversations.find((c) => c.id === activeId) ?? null;
-
-  const appendMsg = (id, msg) =>
-    setConversations((cs) =>
-      cs.map((c) => (c.id === id ? { ...c, messages: [...c.messages, msg] } : c))
-    );
+  const selectConvo = async (id) => {
+    setActiveId(id);
+    setSideOpen(false);
+    try {
+      const { data } = await api.get(`/api/conversations/${id}`);
+      setMessages(
+        data.messages.map((m) => ({ role: m.role, text: m.content, sources: m.sources }))
+      );
+    } catch (err) {
+      fail(err);
+    }
+  };
 
   const send = async (text) => {
     const question = text.trim();
     if (!question || busy) return;
     setBusy(true);
-    let id = activeId;
-    if (!id) {
-      id = newId();
-      const title =
-        question.length > 44 ? `${question.slice(0, 44)}…` : question;
-      setConversations((cs) => [
-        { id, title, messages: [], updatedAt: Date.now() },
-        ...cs,
-      ]);
-      setActiveId(id);
-    }
-    appendMsg(id, { role: "user", text: question });
+    setMessages((ms) => [...ms, { role: "user", text: question }]);
     try {
-      const { data } = await api.post("/api/chat/", { question });
-      appendMsg(id, { role: "bot", text: data.answer, sources: data.sources });
+      let id = activeId;
+      if (!id) {
+        const title = question.length > 44 ? `${question.slice(0, 44)}…` : question;
+        ({ data: { id } } = await api.post("/api/conversations/", { title }));
+        setActiveId(id);
+        setConversations((cs) => [{ id, title }, ...cs]);
+      }
+      const { data } = await api.post(`/api/conversations/${id}/ask`, { question });
+      setMessages((ms) => [...ms, { role: "bot", text: data.answer, sources: data.sources }]);
+      // Sync auto-retitle from server
+      const { data: list } = await api.get("/api/conversations/");
+      setConversations(list);
     } catch (err) {
-      if (err.response?.status === 401) {
-        logout();
-        router.replace("/login");
-      } else {
-        appendMsg(id, {
-          role: "bot",
-          text: "Error: could not reach the backend.",
-        });
+      if (!fail(err)) {
+        setMessages((ms) => [
+          ...ms,
+          { role: "bot", text: "Error: could not reach the backend." },
+        ]);
       }
     } finally {
       setBusy(false);
     }
   };
 
-  const removeConvo = (id) =>
+  const removeConvo = async (id) => {
+    try {
+      await api.delete(`/api/conversations/${id}`);
+    } catch (err) {
+      if (fail(err)) return;
+    }
     setConversations((cs) => {
       const rest = cs.filter((c) => c.id !== id);
-      if (id === activeId) setActiveId(rest[0]?.id ?? null);
+      if (id === activeId) {
+        const next = rest[0]?.id ?? null;
+        setActiveId(next);
+        if (next) selectConvo(next);
+        else setMessages([]);
+      }
       return rest;
     });
+  };
 
   const doLogout = () => {
     logout();
     router.replace("/login");
   };
 
+  if (!ready || !token) return null;
+  const active = conversations.find((c) => c.id === activeId) ?? null;
+
   return (
     <div className="chat-layout">
       <ChatSidebar
         conversations={conversations}
         activeId={activeId}
-        onSelect={(id) => {
-          setActiveId(id);
-          setSideOpen(false);
-        }}
+        onSelect={selectConvo}
         onNew={() => {
           setActiveId(null);
+          setMessages([]);
           setSideOpen(false);
         }}
         onDelete={removeConvo}
@@ -132,7 +144,7 @@ export default function ChatPage() {
           <span className="chat-title">{active?.title ?? "New conversation"}</span>
           <span className="live-dot" title="Backend connected" />
         </div>
-        <ChatWindow messages={active?.messages ?? []} busy={busy} onSend={send} />
+        <ChatWindow messages={messages} busy={busy} onSend={send} />
       </main>
     </div>
   );

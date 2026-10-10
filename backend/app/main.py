@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import auth, chat, ingest
+from app.api.routes import auth, chat, conversations, ingest
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.models import user as _user_model  # noqa: F401  (registers users table)
 from app.models import document as _document_model  # noqa: F401  (registers RAG tables)
+from app.models import conversation as _conversation_model  # noqa: F401  (registers chat history)
 
 # Create tables on startup (simple dev approach; use Alembic later)
 async def lifespan(app: FastAPI):
@@ -31,4 +32,5 @@ def health():
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(ingest.router, prefix="/api/ingest", tags=["ingest"])

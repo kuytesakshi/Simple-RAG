@@ -12,6 +12,47 @@ class ChatResponse(BaseModel):
     sources: list[str] = []
 
 
+# ---- Conversations ----
+
+class ConversationCreate(BaseModel):
+    title: str = Field(default="New conversation", max_length=120)
+
+
+class ConversationOut(BaseModel):
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MessageOut(BaseModel):
+    id: UUID
+    role: str
+    content: str
+    sources: list[str] = []
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationDetail(ConversationOut):
+    messages: list[MessageOut] = []
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
+class AskResponse(BaseModel):
+    conversation_id: UUID
+    answer: str
+    sources: list[str] = []
+
+
 # ---- Auth ----
 
 class UserCreate(BaseModel):
