@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     # Frontend origin allowed to call this API (browser CORS).
     FRONTEND_URL: str = "http://localhost:3000"
+    # RAG chunking (step 2)
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
 
     class Config:
         # Locally: backend/.env | In Docker: /app/.env (copied from backend/.env)
