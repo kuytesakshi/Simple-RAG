@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
     DATABASE_URL: str = "postgresql+psycopg://raguser:ragpass@localhost:5432/ragdb"
     DATA_DIR: str = "/app/Data"
     JWT_SECRET: str = "change-me-in-env"
