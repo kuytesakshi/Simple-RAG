@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import auth, chat, ingest
 from app.core.database import engine, Base
+from app.models import user as _user_model  # noqa: F401  (registers users table)
 
 # Create tables on startup (simple dev approach; use Alembic later)
 async def lifespan(app: FastAPI):

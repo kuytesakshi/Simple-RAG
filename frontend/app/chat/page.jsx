@@ -6,14 +6,14 @@ import { useAuth } from "@/context/AuthContext";
 import ChatWindow from "@/components/ChatWindow";
 
 export default function ChatPage() {
-  const { token, logout } = useAuth();
+  const { token, ready, logout } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!token) router.replace("/login");
-  }, [token, router]);
+    if (ready && !token) router.replace("/login");
+  }, [token, ready, router]);
 
-  if (!token) return null;
+  if (!ready || !token) return null;
 
   return (
     <div className="container">

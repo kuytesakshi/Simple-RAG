@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import MessageBubble from "./MessageBubble";
 
 export default function ChatWindow() {
   const [msgs, setMsgs] = useState([]);
   const [q, setQ] = useState("");
+  const { logout } = useAuth();
 
   const send = async (e) => {
     e.preventDefault();
@@ -14,10 +16,17 @@ export default function ChatWindow() {
     const question = q;
     setMsgs((m) => [...m, { role: "user", text: question }]);
     setQ("");
-    // TODO: POST /api/chat
-    // const { data } = await api.post("/api/chat/", { question });
-    // setMsgs((m) => [...m, { role: "bot", text: data.answer }]);
-    setMsgs((m) => [...m, { role: "bot", text: "(RAG answer placeholder)" }]);
+    try {
+      const { data } = await api.post("/api/chat/", { question });
+      setMsgs((m) => [...m, { role: "bot", text: data.answer }]);
+    } catch (err) {
+      if (err.response?.status === 401) logout(); // token expired/invalid
+      else
+        setMsgs((m) => [
+          ...m,
+          { role: "bot", text: "Error: could not reach the backend." },
+        ]);
+    }
   };
 
   return (
