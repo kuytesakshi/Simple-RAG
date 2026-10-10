@@ -40,5 +40,15 @@ services:
       # live-reload for dev; remove in prod
       - ./backend:/app
 
+  adminer:
+    image: adminer:latest
+    container_name: simple-rag-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+
 volumes:
   pgdata:

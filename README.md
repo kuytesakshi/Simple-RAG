@@ -4,9 +4,9 @@ PDF in `backend/Data/` -> Backend (FastAPI + Postgres pgvector + Groq) -> Fronte
 
 ## Structure (no root .env)
 ```
-docker-compose.yml     # db (pgvector/pgvector:pg16) + backend (Dockerfile-driven)
+docker-compose.yml     # db (pgvector/pgvector:pg16) + backend (Dockerfile-driven) + adminer
 backend/
-  .env                 # backend secrets + port tuning: GROQ_*, DATABASE_URL, JWT_SECRET, POSTGRES_*, BACKEND_PORT
+  .env                 # backend secrets + port tuning: GROQ_*, DATABASE_URL, JWT_SECRET, POSTGRES_*, BACKEND_PORT, ADMINER_PORT
   Data/                # your PDFs (mounted read-only to /app/Data in Docker)
   Dockerfile           # whole backend driven by this
   requirements.txt
@@ -29,7 +29,10 @@ frontend/ (Next.js App Router)
 |----------|----------|-----|--------------------|-------------|
 | backend  | `backend/.env` | `BACKEND_PORT` | 8000 | http://localhost:8000/docs |
 | postgres | `backend/.env` | `POSTGRES_PORT` | 5432 | localhost:5432 |
-| frontend | `frontend/.env.local` | `PORT` | 3000 | http://localhost:3000 |
+| adminer  | `backend/.env` | `ADMINER_PORT` | 8080 | http://localhost:8080 |
+| frontend | `frontend/.env.local` | `PORT` | 3000 | http://localhost:3000/rag |
+
+Frontend base path is env-configurable via `NEXT_PUBLIC_BASE_PATH` in `frontend/.env.local` (default `/rag`), so routes are `<basePath>`, `<basePath>/login`, `<basePath>/chat`. Restart `npm run dev` after changing it.
 
 If you change `BACKEND_PORT` in `backend/.env`, also update `NEXT_PUBLIC_API_URL=http://localhost:<BACKEND_PORT>` in `frontend/.env.local`.
 
@@ -47,5 +50,12 @@ cd frontend
 # .env.local already exists with PORT + NEXT_PUBLIC_API_URL; edit as needed
 npm install
 npm run dev
-# http://localhost:3000  login -> /chat
+# http://localhost:3000/rag  login -> /rag/chat
+```
+
+## Adminer (postgres UI)
+```
+docker compose --env-file backend/.env up -d adminer
+# http://localhost:8080 (or your ADMINER_PORT)
+# System: PostgreSQL | Server: db | Username: raguser | Password: ragpass | Database: ragdb
 ```

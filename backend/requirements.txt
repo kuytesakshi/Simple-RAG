@@ -4,7 +4,8 @@ pydantic==2.*
 pydantic-settings==2.*
 python-dotenv==1.*
 psycopg[binary]==3.*
-SQLAlchemy==2.*
+SQLAlchemy[asyncio]==2.*
+greenlet==3.*
 pgvector==0.3.*
 langchain==0.3.*
 langchain-community==0.3.*

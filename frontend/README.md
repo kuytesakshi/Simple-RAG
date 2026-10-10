@@ -6,6 +6,7 @@ Routes:
 Ports are env-tunable in `frontend/.env.local` (no root .env):
 - `PORT` - Next.js dev port, default 3000
 - `NEXT_PUBLIC_API_URL` - must match `BACKEND_PORT` in `backend/.env`, default http://localhost:8000
+- `NEXT_PUBLIC_BASE_PATH` - base path all pages render under, default `/rag` (change requires restarting dev server)
 
 Run:
 ```
