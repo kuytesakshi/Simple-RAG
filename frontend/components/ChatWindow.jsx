@@ -1,48 +1,83 @@
 "use client";
 
-import { useState } from "react";
-import api from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
+import { useEffect, useRef, useState } from "react";
 import MessageBubble from "./MessageBubble";
 
-export default function ChatWindow() {
-  const [msgs, setMsgs] = useState([]);
-  const [q, setQ] = useState("");
-  const { logout } = useAuth();
+const SUGGESTIONS = [
+  "What is the name of the applicant?",
+  "What is the date of birth?",
+  "Summarize the educational details.",
+];
 
-  const send = async (e) => {
+export default function ChatWindow({ messages, busy, onSend }) {
+  const [q, setQ] = useState("");
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, busy]);
+
+  const submit = (e) => {
     e.preventDefault();
-    if (!q.trim()) return;
-    const question = q;
-    setMsgs((m) => [...m, { role: "user", text: question }]);
+    if (!q.trim() || busy) return;
+    onSend(q);
     setQ("");
-    try {
-      const { data } = await api.post("/api/chat/", { question });
-      setMsgs((m) => [...m, { role: "bot", text: data.answer }]);
-    } catch (err) {
-      if (err.response?.status === 401) logout(); // token expired/invalid
-      else
-        setMsgs((m) => [
-          ...m,
-          { role: "bot", text: "Error: could not reach the backend." },
-        ]);
-    }
   };
 
   return (
-    <div>
-      {msgs.map((m, i) => (
-        <MessageBubble key={i} {...m} />
-      ))}
-      <form onSubmit={send}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Ask about your PDF..."
-          style={{ width: "80%" }}
-        />
-        <button type="submit">Send</button>
-      </form>
-    </div>
+    <>
+      <div className="chat-messages">
+        {messages.length === 0 && !busy ? (
+          <div className="empty-state">
+            <div className="empty-mark" aria-hidden>
+              &#10022;
+            </div>
+            <h2>Ask anything about your PDFs</h2>
+            <p>Pick a suggestion or type your own question below.</p>
+            <div className="sugg-row">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="sugg-chip"
+                  onClick={() => onSend(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((m, i) => <MessageBubble key={i} {...m} />)
+        )}
+        {busy && (
+          <div className="msg-row bot">
+            <div className="avatar" aria-hidden>
+              &#10022;
+            </div>
+            <div className="bubble typing" aria-label="Thinking">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="composer">
+        <form onSubmit={submit}>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Ask about your PDF..."
+            disabled={busy}
+          />
+          <button type="submit" disabled={busy || !q.trim()} aria-label="Send">
+            &#10148;
+          </button>
+        </form>
+      </div>
+    </>
   );
 }
