@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     # RAG chunking (step 2)
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
+    # RAG retrieval: how many chunks per query (env only, no per-request override)
+    RETRIEVAL_TOP_K: int = 4
 
     class Config:
         # Locally: backend/.env | In Docker: /app/.env (copied from backend/.env)

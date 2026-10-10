@@ -44,6 +44,8 @@ def split_documents(
     chunk_id = "<source>:p<page>:c<n>" (n = ordinal within that page),
     so retrieved chunks can cite exact file + page later.
     """
+    chunk_size = settings.CHUNK_SIZE if chunk_size is None else chunk_size
+    chunk_overlap = settings.CHUNK_OVERLAP if chunk_overlap is None else chunk_overlap
     splitter = get_splitter(chunk_size, chunk_overlap)
     chunks = splitter.split_documents(docs)
     seen: Counter[tuple] = Counter()
