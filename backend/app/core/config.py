@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-env"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    # Frontend origin allowed to call this API (browser CORS).
+    FRONTEND_URL: str = "http://localhost:3000"
 
     class Config:
         # Locally: backend/.env | In Docker: /app/.env (copied from backend/.env)
