@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.models.conversation import Conversation, Message
 from app.models.schemas import (
@@ -118,7 +119,21 @@ async def ask(
     question = body.question.strip()
     db.add(Message(conversation_id=convo.id, role="user", content=question))
     await db.flush()
-    answer, sources = await answer_question(db, question)
+    # Session context: last N messages of THIS conversation only.
+    # Other threads (even this user's) are never loaded -> new sessions
+    # cannot see old chats. prior_rows[0] is the question just added above.
+    prior_rows = (
+        await db.execute(
+            select(Message)
+            .where(Message.conversation_id == convo.id)
+            .order_by(Message.created_at.desc())
+            .limit(settings.CHAT_HISTORY_TURNS + 1)
+        )
+    ).scalars().all()
+    history = [(m.role, m.content) for m in reversed(prior_rows[1:])][
+        -settings.CHAT_HISTORY_TURNS :
+    ]
+    answer, sources = await answer_question(db, question, history)
     db.add(Message(conversation_id=convo.id, role="bot", content=answer, sources=sources))
     # Retitle empty threads from the first question
     count = (

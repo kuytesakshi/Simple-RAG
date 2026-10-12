@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
     # RAG retrieval: how many chunks per query (env only, no per-request override)
     RETRIEVAL_TOP_K: int = 4
+    # RAG chat: how many prior messages of THIS conversation feed the LLM
+    CHAT_HISTORY_TURNS: int = 6
 
     class Config:
         # Locally: backend/.env | In Docker: /app/.env (copied from backend/.env)
