@@ -47,7 +47,32 @@ CLASSIFY_PROMPT = """Classify the user's latest message. Reply with exactly one 
   (world news, sports results, general trivia, coding help...).
 - "documents" for anything else, including questions about the document topic
   and follow-ups referencing earlier turns ("his", "it", "that date"...).
-Output only that one word, nothing else."""
+Output only that one word, nothing else.
+
+Examples:
+"hi" -> greeting
+"thanks a lot!" -> greeting
+"what was my last question?" -> history
+"summarize our chat so far" -> history
+"what did I ask about before?" -> history
+"who won the football world cup?" -> off-scope
+"what is the name" -> documents
+"what is the date of birth?" -> documents
+"what is his college?" -> documents"""
+
+# Exact-match greetings skip the classifier LLM call entirely.
+GREETING_WORDS = frozenset({
+    "hi", "hii", "hiii", "hello", "hey", "hey!", "yo",
+    "thanks", "thank you", "thankyou", "thx",
+    "bye", "goodbye", "good morning", "good afternoon", "good evening",
+})
+
+EXPAND_PROMPT = """Expand this short, vague question into one specific standalone
+question so it can be searched in a document collection. Rules: resolve
+pronouns ONLY from the conversation above; if no conversation is given, do
+NOT mention any conversation — instead anchor toward the document (e.g. add
+"in the document" or name the likely subject like "of the applicant").
+Output ONLY the expanded question, never answer it."""
 
 GREETING_PROMPT = """You are a friendly assistant for a document chatbot. Reply briefly and
 warmly to the user's greeting or pleasantry (one or two sentences). Use the
@@ -93,6 +118,13 @@ async def _llm_text(messages) -> str:
 
 async def classify_question(question: str, history: list[tuple[str, str]]) -> str:
     """One of greeting/history/documents/off-scope. Safe default: documents."""
+    import re
+
+    # Exact greetings skip the LLM call: deterministic + free.
+    normalized = re.sub(r"[!?.\s]+$", "", question.strip().lower())
+    if normalized in GREETING_WORDS:
+        logger.info("Classify: %r -> greeting (shortcut)", question[:80])
+        return "greeting"
     parts = []
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")
@@ -143,6 +175,18 @@ async def answer_from_history(
     return answer, []
 
 
+async def expand_query(question: str, history: list[tuple[str, str]]) -> str:
+    """Vague question -> specific searchable form (used only on weak hits)."""
+    parts = []
+    if history:
+        parts.append(f"CONVERSATION:\n{_build_history(history)}")
+    parts.append(f"{EXPAND_PROMPT}\n\nQUESTION: {question}")
+    expanded = await _llm_text([("human", "\n\n".join(parts))])
+    expanded = expanded.strip().strip('"')
+    logger.info("Expand: %r -> %r", question[:80], expanded[:120])
+    return expanded or question
+
+
 async def answer_from_documents(
     db: AsyncSession, question: str, history: list[tuple[str, str]]
 ) -> tuple[str, list[str]]:
@@ -150,6 +194,15 @@ async def answer_from_documents(
     hits = await retrieve(db, search_query)
     if not hits:
         return EMPTY_STORE, []
+    # Weak best hit (vague wording landed in the wrong neighborhood):
+    # expand once and re-retrieve instead of answering from bad context.
+    if hits[0][1] > settings.RETRIEVAL_MAX_DISTANCE:
+        logger.info(
+            "Weak hit (dist=%.4f), expanding: %r", hits[0][1], question[:80]
+        )
+        hits = await retrieve(db, await expand_query(question, history))
+        if not hits:
+            return EMPTY_STORE, []
     parts = []
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")

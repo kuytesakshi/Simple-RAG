@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
     # RAG retrieval: how many chunks per query (env only, no per-request override)
     RETRIEVAL_TOP_K: int = 4
+    # RAG retrieval: best-hit distance above this triggers expand-and-retry
+    # (measured: good hits ~0.55, vague misses ~0.80+)
+    RETRIEVAL_MAX_DISTANCE: float = 0.70
     # RAG chat: how many prior messages of THIS conversation feed the LLM
     CHAT_HISTORY_TURNS: int = 6
 
