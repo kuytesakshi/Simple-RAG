@@ -18,8 +18,17 @@ class Settings(BaseSettings):
     # RAG retrieval: best-hit distance above this triggers expand-and-retry
     # (measured: good hits ~0.55, vague misses ~0.80+)
     RETRIEVAL_MAX_DISTANCE: float = 0.70
+    # RAG retrieval: BM25 + dense fused via RRF (kill-switch back to pure vector)
+    RETRIEVAL_HYBRID: bool = True
+    # Small k sharpens rank gaps on small corpora (60 suits thousand-deep pools)
+    RRF_K: int = 5
+    # Leg weights: keyword-heavy chunks (codes, tables) favor BM25 over vibes
+    DENSE_WEIGHT: float = 1.0
+    BM25_WEIGHT: float = 2.0
     # RAG chat: how many prior messages of THIS conversation feed the LLM
     CHAT_HISTORY_TURNS: int = 6
+    # RAG chat: ask back when evidence holds multiple distinct answers
+    AMBIGUITY_CHECK: bool = True
 
     class Config:
         # Locally: backend/.env | In Docker: /app/.env (copied from backend/.env)

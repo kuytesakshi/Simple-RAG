@@ -12,53 +12,31 @@ Cross-session isolation is structural — history is always loaded per
 conversation_id by the caller, so other threads are invisible here.
 """
 import logging
+import re
 from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
+from app.rag.prompts import REFUSAL, get_prompt
 from app.rag.vectorstore import retrieve
 
 logger = logging.getLogger(__name__)
 
-REFUSAL = "I don't know based on the provided documents."
 EMPTY_STORE = "No documents have been ingested yet. Run the ingestion script first."
 
-SYSTEM_PROMPT = """You answer questions about the user's documents.
-Rules:
-1. Answer ONLY using the CONTEXT below. Never use outside knowledge.
-2. The CONVERSATION is prior chat for understanding references (like "his" or
-   "it"). It is NOT a source of facts — never quote it as evidence.
-3. If the context does not contain the answer, reply with exactly: """
-SYSTEM_PROMPT += REFUSAL + """
-4. Keep answers concise and factual."""
+# Reference markers: pronouns, demonstratives, continuations. Questions
+# without them are standalone — feeding thread history to rewrite/expand
+# can only poison them with unrelated topics (observed live).
+_REFERENCE_RE = re.compile(
+    r"\b(he|she|it|his|her|its|they|them|their|this|that|these|those|then|"
+    r"same|previous|earlier|last|above|former|latter|other|another|more|"
+    r"else|also|such)\b|^(and|but|so|or|nor)\b",
+    re.IGNORECASE,
+)
 
-REWRITE_PROMPT = """Rewrite the follow-up question as a standalone question using the
-conversation above. Rules: resolve pronouns/references from the conversation,
-keep it to one sentence, output ONLY the rewritten question, never answer it.
-If it is already standalone, repeat it unchanged."""
 
-CLASSIFY_PROMPT = """Classify the user's latest message. Reply with exactly one word:
-- "greeting" if it is a greeting, farewell, thanks, or other pleasantry
-  (hi, hello, hey, thanks, thank you, bye, good morning...).
-- "history" if it asks about the conversation itself (their previous
-  questions, your previous answers, repeating or summarizing the chat).
-- "off-scope" if it asks about something clearly unrelated to documents a
-  person would chat about here AND unrelated to the conversation
-  (world news, sports results, general trivia, coding help...).
-- "documents" for anything else, including questions about the document topic
-  and follow-ups referencing earlier turns ("his", "it", "that date"...).
-Output only that one word, nothing else.
-
-Examples:
-"hi" -> greeting
-"thanks a lot!" -> greeting
-"what was my last question?" -> history
-"summarize our chat so far" -> history
-"what did I ask about before?" -> history
-"who won the football world cup?" -> off-scope
-"what is the name" -> documents
-"what is the date of birth?" -> documents
-"what is his college?" -> documents"""
+def _needs_context(question: str) -> bool:
+    return bool(_REFERENCE_RE.search(question))
 
 # Exact-match greetings skip the classifier LLM call entirely.
 GREETING_WORDS = frozenset({
@@ -66,25 +44,6 @@ GREETING_WORDS = frozenset({
     "thanks", "thank you", "thankyou", "thx",
     "bye", "goodbye", "good morning", "good afternoon", "good evening",
 })
-
-EXPAND_PROMPT = """Expand this short, vague question into one specific standalone
-question so it can be searched in a document collection. Rules: resolve
-pronouns ONLY from the conversation above; if no conversation is given, do
-NOT mention any conversation — instead anchor toward the document (e.g. add
-"in the document" or name the likely subject like "of the applicant").
-Output ONLY the expanded question, never answer it."""
-
-GREETING_PROMPT = """You are a friendly assistant for a document chatbot. Reply briefly and
-warmly to the user's greeting or pleasantry (one or two sentences). Use the
-conversation for tone if present. Do not claim document knowledge."""
-
-HISTORY_PROMPT = """You are replaying this conversation's transcript.
-Rules:
-1. Answer using ONLY the transcript below. Quote or summarize what was said.
-2. If the transcript does not contain what is asked (e.g. no previous
-   question exists), say you have no record of it in this conversation.
-3. Do NOT invent turns that are not in the transcript.
-4. Keep answers concise."""
 
 
 @lru_cache(maxsize=1)
@@ -129,7 +88,7 @@ async def classify_question(question: str, history: list[tuple[str, str]]) -> st
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")
     parts.append(f"MESSAGE: {question}")
-    verdict = await _llm_text([("system", CLASSIFY_PROMPT), ("human", "\n\n".join(parts))])
+    verdict = await _llm_text([("system", get_prompt("classify")), ("human", "\n\n".join(parts))])
     verdict = verdict.lower().strip().strip('"')
     route = verdict if verdict in ("greeting", "history", "documents", "off-scope") else "documents"
     logger.info("Classify: %r -> %s", question[:80], route)
@@ -137,14 +96,20 @@ async def classify_question(question: str, history: list[tuple[str, str]]) -> st
 
 
 async def rewrite_question(question: str, history: list[tuple[str, str]]) -> str:
-    """Follow-up -> standalone query. Skipped (no LLM call) when no history."""
-    if not history:
+    """Follow-up -> standalone query. Skipped when nothing needs resolving.
+
+    Skip cases (no LLM call): no history, or no reference markers in the
+    question. Without markers the question is standalone — rewriting can only
+    poison it by merging unrelated thread topics (observed live).
+    """
+    if not history or not _needs_context(question):
+        logger.info("Rewrite skipped (standalone): %r", question[:80])
         return question
     rewritten = await _llm_text(
         [
             (
                 "human",
-                f"CONVERSATION:\n{_build_history(history)}\n\n{REWRITE_PROMPT}\n\nFOLLOW-UP: {question}",
+                f"CONVERSATION:\n{_build_history(history)}\n\n{get_prompt('rewrite')}\n\nFOLLOW-UP: {question}",
             )
         ]
     )
@@ -158,7 +123,7 @@ async def answer_greeting(question: str, history: list[tuple[str, str]]) -> tupl
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")
     parts.append(f"MESSAGE: {question}")
-    return await _llm_text([("system", GREETING_PROMPT), ("human", "\n\n".join(parts))]), []
+    return await _llm_text([("system", get_prompt("greeting")), ("human", "\n\n".join(parts))]), []
 
 
 async def answer_from_history(
@@ -167,7 +132,7 @@ async def answer_from_history(
     """Answer about the dialogue itself. No document sources apply."""
     answer = await _llm_text(
         [
-            ("system", HISTORY_PROMPT),
+            ("system", get_prompt("history")),
             ("human", f"TRANSCRIPT:\n{_build_history(history)}\n\nQUESTION: {question}"),
         ]
     )
@@ -180,11 +145,41 @@ async def expand_query(question: str, history: list[tuple[str, str]]) -> str:
     parts = []
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")
-    parts.append(f"{EXPAND_PROMPT}\n\nQUESTION: {question}")
+    parts.append(f"{get_prompt('expand')}\n\nQUESTION: {question}")
     expanded = await _llm_text([("human", "\n\n".join(parts))])
     expanded = expanded.strip().strip('"')
     logger.info("Expand: %r -> %r", question[:80], expanded[:120])
     return expanded or question
+
+
+async def check_ambiguity(
+    question: str, hits
+) -> tuple[bool, list[str]]:
+    """Does the evidence hold several distinct answers? Returns (flag, options).
+
+    Runs only on retrieved hits (no extra cost on other branches). Options
+    come strictly from chunk text — the prompt forbids inventing any.
+    """
+    if not settings.AMBIGUITY_CHECK or len(hits) < 2:
+        return False, []
+    evidence = "\n\n".join(f"- {chunk.content[:500]}" for chunk, _ in hits)
+    verdict = await _llm_text(
+        [
+            ("system", get_prompt("ambiguity")),
+            ("human", f"EVIDENCE:\n{evidence}\n\nQUESTION: {question}"),
+        ]
+    )
+    lines = [ln.strip() for ln in verdict.splitlines() if ln.strip()]
+    if not lines or lines[0].upper() != "MULTIPLE":
+        return False, []
+    options = [
+        ln.lstrip("-•0123456789. ").strip() for ln in lines[1:4]
+    ]
+    options = [o for o in options if o]
+    if not options:
+        return False, []
+    logger.info("Ambiguous: %r -> %d options", question[:80], len(options))
+    return True, options
 
 
 async def answer_from_documents(
@@ -196,19 +191,29 @@ async def answer_from_documents(
         return EMPTY_STORE, []
     # Weak best hit (vague wording landed in the wrong neighborhood):
     # expand once and re-retrieve instead of answering from bad context.
+    # Expansion gets thread history ONLY for marker-bearing questions;
+    # otherwise it would import unrelated topics (observed live).
     if hits[0][1] > settings.RETRIEVAL_MAX_DISTANCE:
         logger.info(
             "Weak hit (dist=%.4f), expanding: %r", hits[0][1], question[:80]
         )
-        hits = await retrieve(db, await expand_query(question, history))
+        ctx = history if _needs_context(question) else []
+        hits = await retrieve(db, await expand_query(question, ctx))
         if not hits:
             return EMPTY_STORE, []
+    ambiguous, options = await check_ambiguity(question, hits)
+    if ambiguous:
+        numbered = "\n".join(f"{i}. {o}" for i, o in enumerate(options, 1))
+        return (
+            f"I found several possible answers — which one do you mean?\n{numbered}",
+            [chunk.chunk_id for chunk, _ in hits],
+        )
     parts = []
     if history:
         parts.append(f"CONVERSATION:\n{_build_history(history)}")
     parts.append(f"CONTEXT:\n{_build_context(hits)}")
     parts.append(f"QUESTION: {question}")
-    messages = [("system", SYSTEM_PROMPT), ("human", "\n\n".join(parts))]
+    messages = [("system", get_prompt("system")), ("human", "\n\n".join(parts))]
     answer = await _llm_text(messages)
     sources = [chunk.chunk_id for chunk, _ in hits]
     logger.info("Q&A: %r -> %d sources", question[:80], len(sources))

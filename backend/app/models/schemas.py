@@ -78,3 +78,24 @@ class UserOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# ---- Prompt library (admin) ----
+
+class PromptVersionOut(BaseModel):
+    version: int
+    content: str
+    note: str | None = None
+    created_at: datetime
+
+
+class PromptOut(BaseModel):
+    name: str
+    active_version: int
+    updated_at: datetime
+    versions: list[PromptVersionOut] = []
+
+
+class PromptUpdate(BaseModel):
+    content: str = Field(min_length=1)
+    note: str | None = Field(default=None, max_length=255)

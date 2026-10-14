@@ -18,6 +18,9 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     # Kill-switch: disable logins without deleting the row/audit trail
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Admin flag: prompt library + future admin endpoints. Default false;
+    # existing rows backfilled by lifespan migration (ADD COLUMN IF NOT EXISTS).
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

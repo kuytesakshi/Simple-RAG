@@ -52,3 +52,10 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exc
     return user
+
+
+async def require_admin(current: User = Depends(get_current_user)) -> User:
+    """Admin-only routes: 401 handled upstream, 403 here for non-admins."""
+    if not current.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current
